@@ -241,7 +241,9 @@ public abstract class AbstractObjectParser implements ObjectParser {
 							continue;
 						}
 						key = entry.getKey();
-
+						if (key.endsWith("-")) {
+							continue;
+						}
 						try {
 							if (key.startsWith("@") || key.endsWith("@")) {
 								if (onParse(key, value) == false) {

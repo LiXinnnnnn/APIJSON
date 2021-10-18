@@ -26,6 +26,9 @@ import static apijson.SQL.AND;
 import static apijson.SQL.NOT;
 import static apijson.SQL.OR;
 
+import java.text.SimpleDateFormat;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -1528,7 +1531,8 @@ public abstract class AbstractSQLConfig implements SQLConfig {
 		int offset = getOffset(page, count);
 
 		if (isTSQL) {  // OFFSET FECTH 中所有关键词都不可省略, 另外 Oracle 数据库使用子查询加 where 分页
-			return isOracle ? " WHERE ROWNUM BETWEEN "+ offset +" AND "+ (offset + count) : " OFFSET " + offset + " ROWS FETCH FIRST " + count + " ROWS ONLY";
+
+			return isOracle ? " WHERE RN BETWEEN "+ (offset + 1) +" AND "+ (offset + count) : " OFFSET " + offset + " ROWS FETCH FIRST " + count + " ROWS ONLY";
 		}
 
 		return " LIMIT " + count + (offset <= 0 ? "" : " OFFSET " + offset);  // DELETE, UPDATE 不支持 OFFSET
@@ -2006,13 +2010,31 @@ public abstract class AbstractSQLConfig implements SQLConfig {
 	private List<Object> preparedValueList = new ArrayList<>();
 	private Object getValue(@NotNull Object value) {
 		if (isPrepared()) {
-			preparedValueList.add(value);
-			return "?";
+			if (isOracle() && value instanceof String && value.toString().startsWith("to_timestamp") ){
+				value = ((String) value).replaceAll("\"", "\'");
+				String str1 = ((String) value).substring(0,((String) value).indexOf("(") + 1);
+				String str2 = ((String) value).substring(((String) value).indexOf(","),((String) value).length());
+				value = ((String) value).substring(((String) value).indexOf("(") + 1,((String) value).indexOf(","));
+				preparedValueList.add(((String) value).replaceAll("'",""));
+				return str1 + "?" + str2;
+			}else {
+				preparedValueList.add(value);
+				return "?";
+			}
 		}
 		return getSQLValue(value);
 	}
 	public Object getSQLValue(@NotNull Object value) {
 		//		return (value instanceof Number || value instanceof Boolean) && DATABASE_POSTGRESQL.equals(getDatabase()) ? value :  "'" + value + "'";
+		if (isOracle()){
+			if (value instanceof LocalDateTime){
+				return "to_timestamp('" + ((LocalDateTime) value).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) + "','yyyy-mm-dd hh24:mi:ss')";
+			}else if (value instanceof String){
+				if (value.toString().startsWith("to_timestamp")){
+					return ((String) value).replaceAll("\"", "\'");
+				}
+			}
+		}
 		return (value instanceof Number || value instanceof Boolean) ? value :  "'" + value + "'"; //MySQL 隐式转换用不了索引
 	}
 
@@ -2663,6 +2685,18 @@ public abstract class AbstractSQLConfig implements SQLConfig {
 			if(config.isClickHouse()){
 				return  "ALTER TABLE " +  tablePath + " UPDATE"+ config.getSetString()+ config.getWhereString(true);
 			}
+//			if (StringUtil.isEmpty(config.getId(),true)){
+//				RequestMethod requestMethod = config.getMethod();
+//				config.setMethod(RequestMethod.POST);
+//				List<String> columnList = new ArrayList<>(config.getContent().keySet();
+//				config.setColumn();
+//				List<List<Object>> list = new ArrayList<>();
+//				list.add(new ArrayList<>(config.getContent().values()));
+//				config.setValues(list);
+//				String sql = "INSERT INTO " + tablePath + config.getColumnString() + " VALUES" + config.getValuesString();
+//				config.setMethod(requestMethod);
+//				return sql;
+//			}
 			return "UPDATE " + tablePath + config.getSetString() + config.getWhereString(true) + (config.isMySQL() ? config.getLimitString() : "");
 		case DELETE:
 			if(config.isClickHouse()){
@@ -2681,11 +2715,17 @@ public abstract class AbstractSQLConfig implements SQLConfig {
 			if (config.isOracle()) {
 				//When config's database is oracle,Using subquery since Oracle12 below does not support OFFSET FETCH paging syntax.
 				//针对oracle分组后条数的统计
-				if ((config.getMethod() == HEAD || config.getMethod() == HEADS)
-						&& StringUtil.isNotEmpty(config.getGroup(),true)){
-					return explain + "SELECT count(*) FROM (SELECT "+ (config.getCache() == JSONRequest.CACHE_RAM ? "SQL_NO_CACHE " : "") + column + " FROM " + getConditionString(column, tablePath, config) + ") " + config.getLimitString();
+				if ((config.getMethod() == HEAD || config.getMethod() == HEADS)){
+					if (StringUtil.isNotEmpty(config.getGroup(),true)){
+						return explain + "SELECT count(*) FROM (SELECT "+ (config.getCache() == JSONRequest.CACHE_RAM ? "SQL_NO_CACHE " : "") + column + " FROM " + getConditionString(column, tablePath, config) + ") " + config.getLimitString();
+					}else {
+						return explain + "SELECT * FROM (SELECT "+ (config.getCache() == JSONRequest.CACHE_RAM ? "SQL_NO_CACHE " : "") + column + " FROM " + getConditionString(column, tablePath, config) + ") " + config.getLimitString();
+					}
 				}
-				return explain + "SELECT * FROM (SELECT "+ (config.getCache() == JSONRequest.CACHE_RAM ? "SQL_NO_CACHE " : "") + column + " FROM " + getConditionString(column, tablePath, config) + ") " + config.getLimitString();
+				if ("ChildSearch".equals(config.getAlias())){
+					return explain + "select * from (SELECT t.* FROM (SELECT "+ (config.getCache() == JSONRequest.CACHE_RAM ? "SQL_NO_CACHE " : "") + column + " FROM " + getConditionString(column, tablePath, config) + ") t ) " ;
+				}
+				return explain + "select * from (SELECT t.*,ROWNUM as RN FROM (SELECT "+ (config.getCache() == JSONRequest.CACHE_RAM ? "SQL_NO_CACHE " : "") + column + " FROM " + getConditionString(column, tablePath, config) + ") t ) " + config.getLimitString();
 			}
 			
 			return explain + "SELECT " + (config.getCache() == JSONRequest.CACHE_RAM ? "SQL_NO_CACHE " : "") + column + " FROM " + getConditionString(column, tablePath, config) + config.getLimitString();

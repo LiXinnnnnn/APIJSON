@@ -842,7 +842,7 @@ public abstract class AbstractParser<T> implements Parser<T>, ParserCreator<T>, 
 		if (op != null) {//SQL查询结果为空时，functionMap和customMap没有意义
 			
 			if (arrayConfig == null) { //Common
-				response = op.setSQLConfig().executeSQL().response();
+					response = op.setSQLConfig().executeSQL().response();
 			}
 			else {//Array Item Child
 				int query = arrayConfig.getQuery();

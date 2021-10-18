@@ -19,6 +19,7 @@ import java.sql.Savepoint;
 import java.sql.Statement;
 import java.sql.Time;
 import java.sql.Timestamp;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -722,7 +723,15 @@ public abstract class AbstractSQLExecutor implements SQLExecutor {
 	public PreparedStatement setArgument(@NotNull SQLConfig config, @NotNull PreparedStatement statement, int index, Object value) throws SQLException {
 		//JSON.isBooleanOrNumberOrString(v) 解决 PostgreSQL: Can't infer the SQL type to use for an instance of com.alibaba.fastjson.JSONArray
 		if (apijson.JSON.isBooleanOrNumberOrString(value)) {
-			statement.setObject(index + 1, value); //PostgreSQL JDBC 不支持隐式类型转换 tinyint = varchar 报错
+			if (config.isOracle() && value instanceof String && value.toString().startsWith("to_timestamp")){
+				statement.setObject(index + 1,  ((String) value).replaceAll("\"", "\'")); //oracle处理timestamp时间格式
+			}else {
+				statement.setObject(index + 1, value); //PostgreSQL JDBC 不支持隐式类型转换 tinyint = varchar 报错
+			}
+		}else if (config.isOracle() ){
+			if (value instanceof LocalDateTime){
+				statement.setObject(index + 1, value); //oracle处理timestamp时间格式
+			}
 		}
 		else {
 			statement.setString(index + 1, value == null ? null : value.toString()); //MySQL setObject 不支持 JSON 类型
